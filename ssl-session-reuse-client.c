@@ -10,7 +10,7 @@
 #include <netinet/tcp.h>
 #include <pthread.h>
 
-#define NUM_THREADS 100 
+#define NUM_THREADS 512
 
 char req_buf[1024];
 
@@ -111,7 +111,7 @@ void *spawn_same_session_send(void *arg)
 
   // Have to do the shutdown so the data packet is sent out fast enough
   // so it might be read with the last handshake packet
-  shutdown(sfd, SHUT_WR);
+  //shutdown(sfd, SHUT_WR);
 
   char input_buf[1024];
   int read_bytes = SSL_read(ssl, input_buf, sizeof(input_buf));
