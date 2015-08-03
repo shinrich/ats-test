@@ -10,7 +10,7 @@
 #include <netinet/tcp.h>
 #include <pthread.h>
 
-#define NUM_THREADS 512
+#define NUM_THREADS 10
 
 char req_buf[1024];
 
@@ -43,7 +43,8 @@ SSL_pthreads_thread_id(CRYPTO_THREADID *id)
 void *spawn_same_session_send(void *arg) 
 {
   struct thread_info *tinfo = (struct thread_info *)arg;
-   // Start again, but with the session set this time
+
+  // Start again, but with the session set this time
   int sfd = socket(tinfo->rp->ai_family, tinfo->rp->ai_socktype,
                    tinfo->rp->ai_protocol);
   if (sfd == -1) 
@@ -179,12 +180,14 @@ main(int argc, char *argv[])
     size_t len;
     ssize_t nread;
 
-   if (argc < 2) {
-        fprintf(stderr, "Usage: %s host \n", argv[0]);
+   if (argc < 3) {
+        fprintf(stderr, "Usage: %s host thread-count\n", argv[0]);
         exit(EXIT_FAILURE);
     }
    char *host = argv[1];
-   snprintf(req_buf, sizeof(req_buf), "GET /home/index.php HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host);
+   snprintf(req_buf, sizeof(req_buf), "GET /home/images/Retirement.jpg HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host);
+
+   int thread_count = atoi(argv[2]);
 
    /* Obtain address(es) matching host/port */
 
@@ -299,19 +302,19 @@ main(int argc, char *argv[])
   int read_bytes = SSL_read(ssl, input_buf, sizeof(input_buf));
   if (read_bytes > 0 && read_bytes < 1024) input_buf[read_bytes] = '\0';
   else input_buf[1023] = '\0';
-  printf("Received %d bytes %s\n", read_bytes, input_buf);
+  //printf("Received %d bytes %s\n", read_bytes, input_buf);
   SSL_SESSION *session = SSL_get_session(ssl);
   close(sfd);
   struct thread_info tinfo;
   tinfo.rp =rp;
   tinfo.session = session;
-  pthread_t threads[NUM_THREADS];
-  for (i= 0; i < NUM_THREADS; i++) {
+  pthread_t * threads = malloc(thread_count *sizeof(pthread_t));
+  for (i= 0; i < thread_count; i++) {
     pthread_create(threads + i, NULL, spawn_same_session_send, &tinfo);
   }
 
   void *retval;
-  for (i = 0; i < NUM_THREADS; i++) {
+  for (i = 0; i < thread_count; i++) {
     retval = NULL;
     pthread_join(threads[i], &retval);
     if (retval != NULL) {
