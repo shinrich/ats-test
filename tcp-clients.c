@@ -8,9 +8,13 @@
 #include <openssl/ssl.h>
 #include <fcntl.h>
 #include <netinet/tcp.h>
+#define _GNU_SOURCE
 #include <pthread.h>
 
 #define NUM_THREADS 10
+
+char *port_url[] = { "", "8080", "8081", "8082", "8083" , "8084", "8085", "8086" };
+char *host = "localhost";
 
 char req_buf[1024];
 char post_req_buf[1024];
@@ -27,11 +31,20 @@ struct thread_info
 
 void *spawn_same_session_send(void *arg) 
 {
+  char my_req_buf[1024];
   struct thread_info *tinfo = (struct thread_info *)arg;
+  struct sockaddr_in addr;
+  memcpy(&addr, tinfo->rp->ai_addr, tinfo->rp->ai_addrlen);
+  int port_index = rand() & 0x7;
+  if (tinfo->do_get) {
+    snprintf(my_req_buf, sizeof(my_req_buf), "GET /%s HTTP/1.1\r\nHost: %s\r\nConnection: keep-alive\r\n\r\n", port_url[port_index], host);
+  } else {
+    snprintf(my_req_buf, sizeof(my_req_buf), "POST /%s/post_data.php HTTP/1.1\r\nHost: %s\r\nConnection: keep-alive\r\nContent-Length: %d\r\n\r\n", port_url[port_index], host, strlen(post_data_buf));
+  }
 
+while (1) {
   int sfd = socket(tinfo->rp->ai_family, tinfo->rp->ai_socktype,
                    tinfo->rp->ai_protocol);
-
   if (sfd == -1) 
   {
     printf("Failed to get socket");
@@ -42,9 +55,9 @@ void *spawn_same_session_send(void *arg)
 
   struct linger so_linger;
   so_linger.l_onoff = 1;
-  so_linger.l_linger = 0;
+  so_linger.l_linger = 10;
   setsockopt(sfd, SOL_SOCKET, SO_LINGER, &so_linger, sizeof(so_linger));
-  if (connect(sfd, tinfo->rp->ai_addr, tinfo->rp->ai_addrlen) < 0)
+  if (connect(sfd, &addr, tinfo->rp->ai_addrlen) < 0)
   {
     printf("Failed to connect %d\n", sfd);
     perror("Failed");
@@ -58,17 +71,27 @@ void *spawn_same_session_send(void *arg)
   int ret;
   for (i = 0; i < tinfo->count; i++) {
     // Send request
-    if (tinfo->do_get) {
+    int total_wrote = 0;
+    int amount_to_write = strlen(my_req_buf);
+    do { 
+      ret = write(sfd, my_req_buf + total_wrote, amount_to_write - total_wrote);
+      if (ret > 0) total_wrote += ret; 
+    } while (ret != 0 && total_wrote < amount_to_write);
+    if (total_wrote != amount_to_write) {
+      printf("Failed to write all of get request %d of %d\n", total_wrote, amount_to_write);
+      pthread_exit((void *)4);
+    }
+    if (!tinfo->do_get) {
+      total_wrote = 0;
+      amount_to_write = strlen(post_data_buf);
       do { 
-        ret = write(sfd, req_buf, strlen(req_buf));
-      } while (ret < 0);
-    } else {
-      do { 
-        ret = write(sfd, post_req_buf, strlen(post_req_buf));
-      } while (ret < 0);
-      do { 
-        ret = write(sfd, post_data_buf, strlen(post_data_buf));
-      } while (ret < 0);
+        ret = write(sfd, post_data_buf + total_wrote, amount_to_write - total_wrote);
+        if (ret > 0) total_wrote += ret; 
+      } while (ret != 0 && total_wrote < amount_to_write);
+      if (total_wrote != amount_to_write) {
+        printf("Failed to write all of post data %d of %d\n", total_wrote, amount_to_write);
+        pthread_exit((void *)3);
+      }
     } 
 
     // Read result
@@ -130,6 +153,7 @@ void *spawn_same_session_send(void *arg)
 
   
   close(sfd);
+}
   pthread_exit(NULL);
 }
 
@@ -151,7 +175,7 @@ main(int argc, char *argv[])
         fprintf(stderr, "Usage: %s host thread-count client-count\n", argv[0]);
         exit(EXIT_FAILURE);
     }
-   char *host = argv[1];
+   host = argv[1];
 
    int i;
    for (i = 0; i < 1024; i++) {
@@ -211,16 +235,19 @@ main(int argc, char *argv[])
     tinfo[i].count = client_count;
     float percent = (float)rand() / (float)RAND_MAX;
     //tinfo[i].do_get = (percent < 0.8);
-    tinfo[i].do_get = 0;
+    tinfo[i].do_get = 1;
     pthread_create(threads + i, NULL, spawn_same_session_send, tinfo + i);
   }
 
   void *retval;
-  for (i = 0; i < thread_count; i++) {
-    retval = NULL;
-    pthread_join(threads[i], &retval);
-    if (retval != NULL) {
-      //printf("Thread %d failed 0x%x\n", i, retval);
+  while (1) {
+    for (i = 0; i < thread_count; i++) {
+      retval = NULL;
+      if (!pthread_join(threads[i], &retval)) {
+        if (retval != NULL) {
+          printf("Thread %d failed 0x%x\n", i, retval);
+        }
+      }
     }
   }
 
