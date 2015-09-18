@@ -1,5 +1,5 @@
 
-all:	ssl-session-reuse-client ssl-write ssl-clients tcp-clients
+all:	ssl-session-reuse-client ssl-write ssl-clients tcp-clients tcp-single
 
 ssl-session-reuse-client:	ssl-session-reuse-client.c
 	gcc -o ssl-session-reuse-client -O2 -g ssl-session-reuse-client.c -lssl -lpthread
@@ -12,4 +12,7 @@ ssl-clients:	ssl-clients.c
 
 tcp-clients:	tcp-clients.c
 	gcc -o tcp-clients -O2 -g tcp-clients.c -lpthread
+
+tcp-single:	tcp-single.c
+	gcc -o tcp-single -O2 -g tcp-single.c -lpthread
 

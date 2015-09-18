@@ -39,7 +39,7 @@ void *spawn_same_session_send(void *arg)
   memcpy(&addr, tinfo->rp->ai_addr, tinfo->rp->ai_addrlen);
   int port_index = rand() % (sizeof(port_url)/sizeof(char *));
 
-while (1) {
+ {
   int num = rand();
   if (tinfo->do_get) {
     snprintf(my_req_buf, sizeof(my_req_buf), "GET /%s/%x/%d HTTP/1.1\r\nHost: %s\r\nConnection: keep-alive\r\n\r\n", port_url[port_index], tinfo, num, host);
@@ -274,13 +274,11 @@ main(int argc, char *argv[])
   }
 
   void *retval;
-  while (1) {
-    for (i = 0; i < thread_count; i++) {
-      retval = NULL;
-      if (!pthread_join(threads[i], &retval)) {
-        if (retval != NULL) {
-          printf("Thread %d failed 0x%x\n", i, retval);
-        }
+  for (i = 0; i < thread_count; i++) {
+    retval = NULL;
+    if (!pthread_join(threads[i], &retval)) {
+      if (retval != NULL) {
+        printf("Thread %d failed 0x%x\n", i, retval);
       }
     }
   }
