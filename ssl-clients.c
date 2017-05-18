@@ -21,6 +21,7 @@ struct thread_info
   struct addrinfo *result, *rp;
   SSL_SESSION *session;
   int count;
+  char *host;
 }; 
 
 void
@@ -65,6 +66,7 @@ void *spawn_same_session_send(void *arg)
   
   SSL_CTX *client_ctx = SSL_CTX_new(SSLv23_client_method());
   SSL *ssl = SSL_new(client_ctx);
+  SSL_set_tlsext_host_name(ssl, tinfo->host);
   if (tinfo->session) {
     SSL_set_session(ssl, tinfo->session);
   }
@@ -73,6 +75,7 @@ void *spawn_same_session_send(void *arg)
   int ret = SSL_connect(ssl);
   int read_count = 0;
   int write_count = 1;
+  int write_ret = -1;
 
   while (ret < 0) {
     int error = SSL_get_error(ssl, ret);
@@ -80,6 +83,7 @@ void *spawn_same_session_send(void *arg)
     fd_set writes;
     FD_ZERO(&reads);
     FD_ZERO(&writes);
+
     switch (error) {
     case SSL_ERROR_WANT_READ:
     case SSL_ERROR_WANT_ACCEPT:
@@ -112,9 +116,9 @@ void *spawn_same_session_send(void *arg)
   int i;
   for (i = 0; i < tinfo->count; i++) {
     // Send request
-    do { 
-      ret = SSL_write(ssl, req_buf, strlen(req_buf));
-    } while (ret < 0);
+    while (write_ret < 0 ) {
+      write_ret = SSL_write(ssl, req_buf, strlen(req_buf));
+    } 
 
     // Read result
     char input_buf[1024];
@@ -243,7 +247,7 @@ main(int argc, char *argv[])
 
 
    SSL_CTX *client_ctx = SSL_CTX_new(SSLv23_client_method());
-/*   SSL *ssl = SSL_new(client_ctx);
+   SSL *ssl = SSL_new(client_ctx);
 
    SSL_set_fd(ssl, sfd);
    int ret = SSL_connect(ssl);
@@ -263,12 +267,13 @@ main(int argc, char *argv[])
   else input_buf[1023] = '\0';
   //printf("Received %d bytes %s\n", read_bytes, input_buf);
   SSL_SESSION *session = SSL_get_session(ssl);
-  close(sfd); */
+  close(sfd); 
   struct thread_info tinfo;
   tinfo.rp =rp;
-  //tinfo.session = session;
-  tinfo.session = NULL;
+  tinfo.session = session;
+  //tinfo.session = NULL;
   tinfo.count = client_count;
+  tinfo.host = host;
   pthread_t * threads = malloc(thread_count *sizeof(pthread_t));
   for (i= 0; i < thread_count; i++) {
     pthread_create(threads + i, NULL, spawn_same_session_send, &tinfo);

@@ -12,7 +12,8 @@
 
 #define NUM_THREADS 10
 
-char req_buf[1024];
+char req_buf[10000];
+char post_buf[1000];
 
 pthread_mutex_t *mutex_buf = NULL;
 
@@ -61,6 +62,9 @@ void *spawn_same_session_send(void *arg)
   }
 
   fcntl(sfd, F_SETFL, O_NONBLOCK);
+  // Make sure we are nagling
+  int one = 0;
+  setsockopt(sfd, SOL_TCP, TCP_NODELAY, &one, sizeof(one));
   
   SSL_CTX *client_ctx = SSL_CTX_new(SSLv23_client_method());
   SSL *ssl = SSL_new(client_ctx);
@@ -71,6 +75,7 @@ void *spawn_same_session_send(void *arg)
   int read_count = 0;
   int write_count = 1;
   int write_ret = -1;
+  int post_write_ret = -1;
 
   while (ret < 0) {
     int error = SSL_get_error(ssl, ret);
@@ -102,16 +107,18 @@ void *spawn_same_session_send(void *arg)
       break;
     }
     ret = select(sfd+1, &reads, &writes, NULL, NULL);
-    if (FD_ISSET(sfd, &writes) || FD_ISSET(sfd, &reads)) {
-      ret = SSL_connect(ssl);
-      if (ret >= 0) {
-        write_ret = SSL_write(ssl, req_buf, strlen(req_buf));
-      }
+    if (FD_ISSET(sfd, &reads) || FD_ISSET(sfd, &writes)) {
+      ret = write_ret = SSL_write(ssl, req_buf, strlen(req_buf));
+      if (write_ret >= 0) 
+        post_write_ret = SSL_write(ssl, post_buf, sizeof(post_buf));
     }
   } 
 
   while (write_ret < 0) {
      write_ret = SSL_write(ssl, req_buf, strlen(req_buf));
+  }
+  while (post_write_ret < 0) {
+    post_write_ret = SSL_write(ssl, post_buf, sizeof(post_buf));
   }
 
   // Have to do the shutdown so the data packet is sent out fast enough
@@ -184,12 +191,19 @@ main(int argc, char *argv[])
     size_t len;
     ssize_t nread;
 
-   if (argc < 3) {
-        fprintf(stderr, "Usage: %s host thread-count\n", argv[0]);
+   if (argc < 4) {
+        fprintf(stderr, "Usage: %s host thread-count header-count\n", argv[0]);
         exit(EXIT_FAILURE);
     }
    char *host = argv[1];
-   snprintf(req_buf, sizeof(req_buf), "GET /home/images/Retirement.jpg HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host);
+   int header_count = atoi(argv[3]);
+   snprintf(req_buf, sizeof(req_buf), "POST /post HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nContent-length:%d\r\n", host, sizeof(post_buf));
+   int i;
+   for (i = 0; i < header_count; i++) {
+     sprintf(req_buf + strlen(req_buf), "header%d:%d\r\n", i, i);
+   }
+   strcat(req_buf, "\r\n");
+   memset(post_buf, '0', sizeof(post_buf));
 
    int thread_count = atoi(argv[2]);
 
@@ -235,7 +249,6 @@ main(int argc, char *argv[])
   SSL_library_init();
 
   mutex_buf = (pthread_mutex_t *)OPENSSL_malloc(CRYPTO_num_locks() * sizeof(pthread_mutex_t));
-  int i;
   for (i = 0; i < CRYPTO_num_locks(); i++) {
     pthread_mutex_init(&mutex_buf[i], NULL);
   }
@@ -301,6 +314,7 @@ main(int argc, char *argv[])
       printf("SSL_write failed %d", error);
       exit(1);
    }
+   SSL_write(ssl, post_buf, sizeof(post_buf));
 
   char input_buf[1024];
   int read_bytes = SSL_read(ssl, input_buf, sizeof(input_buf));
